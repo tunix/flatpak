@@ -1,0 +1,136 @@
+# Rebuilds the named app into the OSTree repo and republishes the signed
+# summary to gh-pages. Triggered by app repos via repository_dispatch.
+name: Update flatpak repo
+
+on:
+  repository_dispatch:
+    types: [app-released]
+  workflow_dispatch:
+    inputs:
+      app_id:
+        description: "App id (e.g. io.github.tunix.valhalla)"
+        required: true
+        type: string
+      tag:
+        description: "Git tag to build"
+        required: true
+        type: string
+
+permissions:
+  contents: read
+
+jobs:
+  update:
+    name: Build ${{ inputs.app_id }}
+    runs-on: ubuntu-latest
+    # The runner image does not ship flatpak-builder; this container owns the
+    # whole toolchain (flatpak, flatpak-builder, flathub remote) and is
+    # multi-arch. --privileged is required for flatpak sandboxing.
+    container:
+      image: ghcr.io/flathub-infra/flatpak-github-actions:gnome-49
+      options: --privileged
+    env:
+      APP_ID: ${{ inputs.app_id }}
+      TAG: ${{ inputs.tag }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          path: control
+
+      - name: Sanity-check inputs
+        run: |
+          set -eu
+          grep -q "\"${APP_ID}\"" control/.github/workflows/update-repo.yml || {
+            echo "::error::${APP_ID} is not in the app matrix of update-repo.yml"; exit 1; }
+          test -f "control/apps/${APP_ID}.json" || {
+            echo "::error::control/apps/${APP_ID}.json missing"; exit 1; }
+
+      # Pull the existing published repo so prior builds survive and old
+      # installs keep updating against them.
+      - name: Restore existing OSTree repo from gh-pages
+        run: |
+          set -eu
+          git clone --depth 1 --branch gh-pages \
+            "https://x-access-token:${GITHUB_TOKEN}@github.com/${GITHUB_REPOSITORY}.git" \
+            published 2>/dev/null || mkdir published
+          mkdir -p repo
+          if [ -d published/repo ]; then cp -a published/repo/. repo/; fi
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+      # Clone the app at the requested tag. The manifest's first module source
+      # is rewritten to reference this clone via type:dir so flatpak-builder
+      # builds the checked-out tag, and generated-sources.json is regenerated
+      # from the app's Cargo.lock (checked-in copies drift behind renovate).
+      - name: Clone app source at tag and prepare manifest
+        run: |
+          set -eu
+          APP_URL=$(python3 -c "
+          import json
+          m = json.load(open('control/apps/${APP_ID}.json'))
+          s = [s for s in m['modules'][0]['sources'] if s.get('type') == 'git'][0]
+          print(s['url'])")
+          git clone --depth 1 --branch "${TAG}" "${APP_URL}" app
+          cd app
+          if [ -f Cargo.lock ] && [ -d flatpak ]; then
+            python3 -m venv .venv-flatpak
+            .venv-flatpak/bin/pip install -q 'aiohttp<4.0.0,>=3.9.5' 'PyYAML<7.0.0,>=6.0.2' 'tomlkit>=0.13.3,<1.0'
+            .venv-flatpak/bin/python flatpak/flatpak-cargo-generator.py Cargo.lock \
+              -o flatpak/generated-sources.json
+          fi
+          cd ..
+          # Point the manifest's app source at the local clone.
+          python3 - "$APP_ID" <<'PY'
+          import json, sys
+          app_id = sys.argv[1]
+          p = f'control/apps/{app_id}.json'
+          m = json.load(open(p))
+          for s in m['modules'][0]['sources']:
+              if s.get('type') == 'git':
+                  s.clear(); s.update({'type': 'dir', 'path': 'app'})
+          json.dump(m, open(p, 'w'), indent=2)
+          PY
+
+      - name: Import GPG key
+        id: gpg
+        run: |
+          set -eu
+          echo "${{ secrets.GPG_KEY }}" | gpg --batch --import
+          KEYID=$(gpg --list-secret-keys --with-colons | awk -F: '/^sec/{print $5; exit}')
+          echo "keyid=${KEYID}" >> "$GITHUB_OUTPUT"
+
+      - name: flatpak-builder
+        uses: flatpak/flatpak-github-actions/flatpak-builder@79327416609af08178ad73b352877e51450790b3 # master @ 7932741 (node24)
+        with:
+          repository: repo
+          manifest-path: control/apps/${{ env.APP_ID }}.json
+          branch: stable
+          cache-key: flatpak-builder-${{ env.APP_ID }}-${{ env.TAG }}
+          gpg-sign: ${{ steps.gpg.outputs.keyid }}
+
+      - name: Regenerate signed summary with static deltas
+        run: |
+          set -eu
+          flatpak build-update-repo \
+            --gpg-sign="${{ steps.gpg.outputs.keyid }}" \
+            --generate-static-deltas --prune repo
+
+      - name: Publish to gh-pages
+        run: |
+          set -eu
+          if [ ! -d published/.git ]; then
+            cd published && git init -b gh-pages . && \
+            git remote add origin "https://x-access-token:${GITHUB_TOKEN}@github.com/${GITHUB_REPOSITORY}.git"
+            cd ..
+          fi
+          cd published
+          git config user.name "flatpak-repo-bot"
+          git config user.email "actions@users.noreply.github.com"
+          rm -rf repo && cp -a ../repo repo
+          cp -a ../control/apps/*.flatpakref . 2>/dev/null || true
+          cp -a ../control/tunix.flatpakrepo .
+          git add -A
+          git commit -m "Update repo: ${APP_ID} @ ${TAG}" || { echo "no changes"; exit 0; }
+          git push -f origin gh-pages
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
