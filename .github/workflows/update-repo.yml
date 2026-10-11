@@ -21,7 +21,7 @@ permissions:
 
 jobs:
   update:
-    name: Build ${{ inputs.app_id }}
+    name: Build ${{ inputs.app_id || github.event.client_payload.app_id }}
     runs-on: ubuntu-latest
     # The runner image does not ship flatpak-builder; this container owns the
     # whole toolchain (flatpak, flatpak-builder, flathub remote) and is
@@ -30,8 +30,10 @@ jobs:
       image: ghcr.io/flathub-infra/flatpak-github-actions:gnome-49
       options: --privileged
     env:
-      APP_ID: ${{ inputs.app_id }}
-      TAG: ${{ inputs.tag }}
+      # workflow_dispatch fills inputs; repository_dispatch fills
+      # github.event.client_payload. Either path must yield both values.
+      APP_ID: ${{ inputs.app_id || github.event.client_payload.app_id }}
+      TAG: ${{ inputs.tag || github.event.client_payload.tag }}
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
