@@ -78,6 +78,10 @@ jobs:
             .venv-flatpak/bin/pip install -q 'aiohttp<4.0.0,>=3.9.5' 'PyYAML<7.0.0,>=6.0.2' 'tomlkit>=0.13.3,<1.0'
             .venv-flatpak/bin/python flatpak/flatpak-cargo-generator.py Cargo.lock \
               -o flatpak/generated-sources.json
+            # The bare 'generated-sources.json' entry in the manifest resolves
+            # against the manifest's directory (control/apps/), NOT the app
+            # clone — publish the regenerated file there.
+            cp flatpak/generated-sources.json "../control/apps/generated-sources.json"
           fi
           cd ..
           # Point the manifest's app source at the local clone. The path
