@@ -68,7 +68,8 @@ jobs:
           APP_URL=$(python3 -c "
           import json
           m = json.load(open('control/apps/${APP_ID}.json'))
-          s = [s for s in m['modules'][0]['sources'] if s.get('type') == 'git'][0]
+          s = [x for x in m['modules'][0]['sources']
+               if isinstance(x, dict) and x.get('type') == 'git'][0]
           print(s['url'])")
           git clone --depth 1 --branch "${TAG}" "${APP_URL}" app
           cd app
@@ -85,9 +86,9 @@ jobs:
           app_id = sys.argv[1]
           p = f'control/apps/{app_id}.json'
           m = json.load(open(p))
-          for s in m['modules'][0]['sources']:
-              if s.get('type') == 'git':
-                  s.clear(); s.update({'type': 'dir', 'path': 'app'})
+          for x in m['modules'][0]['sources']:
+              if isinstance(x, dict) and x.get('type') == 'git':
+                  x.clear(); x.update({'type': 'dir', 'path': 'app'})
           json.dump(m, open(p, 'w'), indent=2)
           PY
 
