@@ -80,15 +80,17 @@ jobs:
               -o flatpak/generated-sources.json
           fi
           cd ..
-          # Point the manifest's app source at the local clone.
-          python3 - "$APP_ID" <<'PY'
+          # Point the manifest's app source at the local clone. The path
+          # must be absolute: flatpak-builder resolves type:dir paths relative
+          # to the MANIFEST's directory (control/apps/), not the workspace.
+          python3 - "$APP_ID" "$GITHUB_WORKSPACE" <<'PY'
           import json, sys
-          app_id = sys.argv[1]
+          app_id, ws = sys.argv[1], sys.argv[2]
           p = f'control/apps/{app_id}.json'
           m = json.load(open(p))
           for x in m['modules'][0]['sources']:
               if isinstance(x, dict) and x.get('type') == 'git':
-                  x.clear(); x.update({'type': 'dir', 'path': 'app'})
+                  x.clear(); x.update({'type': 'dir', 'path': f'{ws}/app'})
           json.dump(m, open(p, 'w'), indent=2)
           PY
 
