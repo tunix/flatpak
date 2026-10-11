@@ -1,0 +1,7 @@
+[Flatpak Ref]
+Name=io.github.tunix.valhalla
+Branch=stable
+Url=https://tunix.github.io/flatpak/repo
+IsRuntime=false
+GPGKey=
+RuntimeRepo=https://tunix.github.io/flatpak/tunix.flatpakrepo
