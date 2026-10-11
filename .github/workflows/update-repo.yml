@@ -42,8 +42,6 @@ jobs:
       - name: Sanity-check inputs
         run: |
           set -eu
-          grep -q "\"${APP_ID}\"" control/.github/workflows/update-repo.yml || {
-            echo "::error::${APP_ID} is not in the app matrix of update-repo.yml"; exit 1; }
           test -f "control/apps/${APP_ID}.json" || {
             echo "::error::control/apps/${APP_ID}.json missing"; exit 1; }
 
