@@ -118,6 +118,9 @@ jobs:
       - name: Regenerate signed summary with static deltas
         run: |
           set -eu
+          # build-update-repo lists refs/remotes (remote-mirror cache) and
+          # fails when the directory is missing on a restored repo.
+          mkdir -p repo/refs/remotes
           flatpak build-update-repo \
             --gpg-sign="${{ steps.gpg.outputs.keyid }}" \
             --generate-static-deltas --prune repo
