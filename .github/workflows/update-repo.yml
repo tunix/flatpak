@@ -98,6 +98,25 @@ jobs:
           json.dump(m, open(p, 'w'), indent=2)
           PY
 
+      # The app's metainfo lags one release behind its tag by design: the app
+      # repo syncs <releases> from the changelog via a follow-up PR that can
+      # only land AFTER the tag is cut, so a tag build would always publish
+      # the previous version's appstream (1.3.2 shipped reporting 1.3.1 in
+      # flatpak list/info). Regenerate <releases> from the tag's own
+      # changelog before building. Apps without the sync script are skipped.
+      - name: Sync appstream <releases> from the tag's changelog
+        run: |
+          set -eu
+          if [ -f app/scripts/update_metainfo.py ] && [ -f app/CHANGELOG.md ]; then
+            META=$(ls app/data/*.metainfo.xml 2>/dev/null | head -1)
+            test -n "${META}" || { echo "no metainfo under app/data - skipping sync"; exit 0; }
+            # update_metainfo.py exits 1 when it rewrote the file (0 = current,
+            # 2 = error); the default step shell is bash -e, map 1 to success.
+            python3 app/scripts/update_metainfo.py app/CHANGELOG.md "${META}" || [ $? -eq 1 ]
+          else
+            echo "no metainfo sync script in the app clone - skipping"
+          fi
+
       - name: Import GPG key
         id: gpg
         run: |
