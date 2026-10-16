@@ -163,3 +163,43 @@ jobs:
           git push -f origin gh-pages
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+      # The canonical domain (alperkan.at) is fronted by Cloudflare whose edge
+      # cache (observed max-age=14400) can serve stale summary/refs pairs for
+      # hours after a publish — mismatched pairs even fail GPG verification
+      # ("BAD signature": summary from build N, sig from build N-1). Purge the
+      # fixed-name files; everything else is content-addressed, hence
+      # immutable. Skipped when the Cloudflare secrets are not configured.
+      - name: Purge fixed-name repo files from the CDN
+        env:
+          CF_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          CF_ZONE: ${{ secrets.CLOUDFLARE_ZONE_ID }}
+        if: env.CF_TOKEN != '' && env.CF_ZONE != ''
+        run: |
+          set -eu
+          BASE="https://alperkan.at/flatpak/repo"
+          FILES=(
+            "$BASE/summary" "$BASE/summary.sig"
+            "$BASE/summary.idx" "$BASE/summary.idx.sig"
+            "$BASE/refs/heads/app/${APP_ID}/x86_64/stable"
+            "$BASE/refs/heads/app/${APP_ID}/aarch64/stable"
+            "$BASE/refs/heads/appstream/x86_64"
+            "$BASE/refs/heads/appstream/aarch64"
+            "$BASE/refs/heads/appstream2/x86_64"
+            "$BASE/refs/heads/appstream2/aarch64"
+          )
+          PAYLOAD=$(python3 -c '
+            import json, sys
+            print(json.dumps({"files": sys.argv[1:]}))' "${FILES[@]}")
+          curl -sSf -X POST \
+            "https://api.cloudflare.com/client/v4/zones/${CF_ZONE}/purge_cache" \
+            -H "Authorization: Bearer ${CF_TOKEN}" \
+            -H "Content-Type: application/json" \
+            -d "${PAYLOAD}" > /tmp/purge.json
+          python3 - /tmp/purge.json <<'PY'
+          import json, sys
+          r = json.load(open(sys.argv[1]))
+          if not r.get("success"):
+              print(r); sys.exit(1)
+          print("CDN purge OK")
+          PY
