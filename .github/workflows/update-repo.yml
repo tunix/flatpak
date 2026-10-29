@@ -188,9 +188,11 @@ jobs:
             "$BASE/refs/heads/appstream2/x86_64"
             "$BASE/refs/heads/appstream2/aarch64"
           )
+          # NOTE: python3 -c rejects indented top-level statements; the code
+          # must sit at the block scalar's strip column (0 after stripping).
           PAYLOAD=$(python3 -c '
-            import json, sys
-            print(json.dumps({"files": sys.argv[1:]}))' "${FILES[@]}")
+          import json, sys
+          print(json.dumps({"files": sys.argv[1:]}))' "${FILES[@]}")
           curl -sSf -X POST \
             "https://api.cloudflare.com/client/v4/zones/${CF_ZONE}/purge_cache" \
             -H "Authorization: Bearer ${CF_TOKEN}" \
